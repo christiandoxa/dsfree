@@ -91,6 +91,20 @@ def wants_thinking(body: Dict[str, Any]) -> bool:
     return model == "deepseek-reasoner"
 
 
+def should_delete_history(body: Dict[str, Any]) -> bool:
+    if body.get("keep_history") is True:
+        return False
+    keep_history_env = os.getenv("DSFREE_KEEP_HISTORY", "").lower()
+    return keep_history_env not in ("1", "true", "yes", "on")
+
+
+def delete_session_quietly(api: DeepSeekAPI, chat_id: str) -> None:
+    try:
+        api.delete_chat_session(chat_id)
+    except Exception:
+        pass
+
+
 def make_usage(prompt: str, content: str, reasoning: str = "") -> Dict[str, Any]:
     prompt_tokens = max(1, len(prompt.split()))
     completion_tokens = max(1, len((content + " " + reasoning).split())) if content or reasoning else 0
@@ -153,90 +167,9 @@ def stream_chunks(
     completion_id: str,
     created: int,
     include_usage: bool,
+    delete_history: bool,
 ) -> Iterable[str]:
-    yield sse(
-        {
-            "id": completion_id,
-            "object": "chat.completion.chunk",
-            "created": created,
-            "model": model,
-            "system_fingerprint": "dsfree-web",
-            "choices": [
-                {
-                    "index": 0,
-                    "delta": {"role": "assistant"},
-                    "finish_reason": None,
-                    "logprobs": None,
-                }
-            ],
-            "usage": None,
-        }
-    )
-
-    content_parts = []
-    reasoning_parts = []
-
     try:
-        for chunk in api.chat_completion(
-            chat_id,
-            prompt,
-            thinking_enabled=thinking_enabled,
-            search_enabled=search_enabled,
-        ):
-            chunk_type = chunk.get("type")
-            content = chunk.get("content") or ""
-            if chunk_type == "thinking" and content:
-                reasoning_parts.append(content)
-                delta = {"reasoning_content": content}
-            elif chunk_type == "text" and content:
-                content_parts.append(content)
-                delta = {"content": content}
-            else:
-                continue
-
-            yield sse(
-                {
-                    "id": completion_id,
-                    "object": "chat.completion.chunk",
-                    "created": created,
-                    "model": model,
-                    "system_fingerprint": "dsfree-web",
-                    "choices": [
-                        {
-                            "index": 0,
-                            "delta": delta,
-                            "finish_reason": None,
-                            "logprobs": None,
-                        }
-                    ],
-                    "usage": None,
-                }
-            )
-    except Exception as exc:
-        yield sse({"error": {"message": str(exc), "type": exc.__class__.__name__}})
-        yield "data: [DONE]\n\n"
-        return
-
-    yield sse(
-        {
-            "id": completion_id,
-            "object": "chat.completion.chunk",
-            "created": created,
-            "model": model,
-            "system_fingerprint": "dsfree-web",
-            "choices": [
-                {
-                    "index": 0,
-                    "delta": {},
-                    "finish_reason": "stop",
-                    "logprobs": None,
-                }
-            ],
-            "usage": None,
-        }
-    )
-
-    if include_usage:
         yield sse(
             {
                 "id": completion_id,
@@ -244,12 +177,98 @@ def stream_chunks(
                 "created": created,
                 "model": model,
                 "system_fingerprint": "dsfree-web",
-                "choices": [],
-                "usage": make_usage(prompt, "".join(content_parts), "".join(reasoning_parts)),
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": {"role": "assistant"},
+                        "finish_reason": None,
+                        "logprobs": None,
+                    }
+                ],
+                "usage": None,
             }
         )
 
-    yield "data: [DONE]\n\n"
+        content_parts = []
+        reasoning_parts = []
+
+        try:
+            for chunk in api.chat_completion(
+                chat_id,
+                prompt,
+                thinking_enabled=thinking_enabled,
+                search_enabled=search_enabled,
+            ):
+                chunk_type = chunk.get("type")
+                content = chunk.get("content") or ""
+                if chunk_type == "thinking" and content:
+                    reasoning_parts.append(content)
+                    delta = {"reasoning_content": content}
+                elif chunk_type == "text" and content:
+                    content_parts.append(content)
+                    delta = {"content": content}
+                else:
+                    continue
+
+                yield sse(
+                    {
+                        "id": completion_id,
+                        "object": "chat.completion.chunk",
+                        "created": created,
+                        "model": model,
+                        "system_fingerprint": "dsfree-web",
+                        "choices": [
+                            {
+                                "index": 0,
+                                "delta": delta,
+                                "finish_reason": None,
+                                "logprobs": None,
+                            }
+                        ],
+                        "usage": None,
+                    }
+                )
+        except Exception as exc:
+            yield sse({"error": {"message": str(exc), "type": exc.__class__.__name__}})
+            yield "data: [DONE]\n\n"
+            return
+
+        yield sse(
+            {
+                "id": completion_id,
+                "object": "chat.completion.chunk",
+                "created": created,
+                "model": model,
+                "system_fingerprint": "dsfree-web",
+                "choices": [
+                    {
+                        "index": 0,
+                        "delta": {},
+                        "finish_reason": "stop",
+                        "logprobs": None,
+                    }
+                ],
+                "usage": None,
+            }
+        )
+
+        if include_usage:
+            yield sse(
+                {
+                    "id": completion_id,
+                    "object": "chat.completion.chunk",
+                    "created": created,
+                    "model": model,
+                    "system_fingerprint": "dsfree-web",
+                    "choices": [],
+                    "usage": make_usage(prompt, "".join(content_parts), "".join(reasoning_parts)),
+                }
+            )
+
+        yield "data: [DONE]\n\n"
+    finally:
+        if delete_history:
+            delete_session_quietly(api, chat_id)
 
 
 @app.get("/health")
@@ -290,6 +309,7 @@ async def chat_completions_async(
     stream = bool(body.get("stream"))
     search_enabled = bool(body.get("search_enabled") or body.get("search"))
     thinking_enabled = wants_thinking(body)
+    delete_history = should_delete_history(body)
     completion_id = f"chatcmpl-{uuid.uuid4().hex}"
     created = int(time.time())
 
@@ -316,6 +336,7 @@ async def chat_completions_async(
                 completion_id,
                 created,
                 include_usage,
+                delete_history,
             ),
             media_type="text/event-stream",
         )
@@ -323,24 +344,28 @@ async def chat_completions_async(
     content_parts = []
     reasoning_parts = []
     try:
-        for chunk in api.chat_completion(
-            chat_id,
-            prompt,
-            thinking_enabled=thinking_enabled,
-            search_enabled=search_enabled,
-        ):
-            if chunk.get("type") == "thinking":
-                reasoning_parts.append(chunk.get("content") or "")
-            elif chunk.get("type") == "text":
-                content_parts.append(chunk.get("content") or "")
-            if chunk.get("finish_reason") == "stop":
-                break
-    except AuthenticationError as exc:
-        raise HTTPException(status_code=401, detail=str(exc)) from exc
-    except RateLimitError as exc:
-        raise HTTPException(status_code=429, detail=str(exc)) from exc
-    except (APIError, NetworkError) as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
+        try:
+            for chunk in api.chat_completion(
+                chat_id,
+                prompt,
+                thinking_enabled=thinking_enabled,
+                search_enabled=search_enabled,
+            ):
+                if chunk.get("type") == "thinking":
+                    reasoning_parts.append(chunk.get("content") or "")
+                elif chunk.get("type") == "text":
+                    content_parts.append(chunk.get("content") or "")
+                if chunk.get("finish_reason") == "stop":
+                    break
+        except AuthenticationError as exc:
+            raise HTTPException(status_code=401, detail=str(exc)) from exc
+        except RateLimitError as exc:
+            raise HTTPException(status_code=429, detail=str(exc)) from exc
+        except (APIError, NetworkError) as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+    finally:
+        if delete_history:
+            delete_session_quietly(api, chat_id)
 
     return JSONResponse(
         make_completion(

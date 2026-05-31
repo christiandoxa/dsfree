@@ -190,6 +190,18 @@ class DeepSeekAPI:
         except KeyError:
             raise APIError("Invalid session creation response format from server")
 
+    def delete_chat_session(self, chat_session_id: str) -> bool:
+        """Delete a chat session from the web chat history."""
+        if not chat_session_id or not isinstance(chat_session_id, str):
+            raise ValueError("Chat session ID must be a non-empty string")
+
+        self._make_request(
+            'POST',
+            '/chat_session/delete',
+            {'chat_session_id': chat_session_id}
+        )
+        return True
+
     def chat_completion(self,
                     chat_session_id: str,
                     prompt: str,

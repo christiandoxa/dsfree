@@ -41,6 +41,9 @@ Start an interactive chat:
 python dsfree.py
 ```
 
+By default, the CLI deletes the temporary DeepSeek web chat when it exits. Use
+`--keep-history` only if you want the chat to stay visible in the web UI.
+
 Send one prompt and exit without putting the token in shell history:
 
 ```bash
@@ -107,6 +110,11 @@ Supported endpoints:
 - `POST /v1/chat/completions`
 
 Streaming is supported with `stream: true` and sends `data: [DONE]` at the end.
+
+By default, each API request creates a temporary web chat and deletes it after
+the response finishes, so it should not remain in the DeepSeek web history.
+Set `"keep_history": true` per request or `DSFREE_KEEP_HISTORY=1` on the server
+to keep chats visible.
 
 ## Minimal Usage
 

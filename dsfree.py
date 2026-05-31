@@ -39,6 +39,7 @@ def parse_args():
     parser.add_argument("prompt", nargs="*", help="Optional one-shot prompt.")
     parser.add_argument("--thinking", action="store_true", help="Enable DeepThink when available.")
     parser.add_argument("--search", action="store_true", help="Enable web search when available.")
+    parser.add_argument("--keep-history", action="store_true", help="Keep the chat in DeepSeek web history.")
     return parser.parse_args()
 
 
@@ -57,54 +58,61 @@ def main():
         chat_id = api.create_chat_session()
         parent_message_id = None
 
-        if args.prompt:
-            prompt = " ".join(args.prompt)
-            stream_response(
-                api,
-                chat_id,
-                prompt,
-                parent_message_id=parent_message_id,
-                thinking=args.thinking,
-                search=args.search,
-            )
-            return 0
+        try:
+            if args.prompt:
+                prompt = " ".join(args.prompt)
+                stream_response(
+                    api,
+                    chat_id,
+                    prompt,
+                    parent_message_id=parent_message_id,
+                    thinking=args.thinking,
+                    search=args.search,
+                )
+                return 0
 
-        if not sys.stdin.isatty():
-            prompt = sys.stdin.read().strip()
-            if not prompt:
-                print("Empty prompt on stdin.", file=sys.stderr)
-                return 2
-            stream_response(
-                api,
-                chat_id,
-                prompt,
-                parent_message_id=parent_message_id,
-                thinking=args.thinking,
-                search=args.search,
-            )
-            return 0
+            if not sys.stdin.isatty():
+                prompt = sys.stdin.read().strip()
+                if not prompt:
+                    print("Empty prompt on stdin.", file=sys.stderr)
+                    return 2
+                stream_response(
+                    api,
+                    chat_id,
+                    prompt,
+                    parent_message_id=parent_message_id,
+                    thinking=args.thinking,
+                    search=args.search,
+                )
+                return 0
 
-        print("Interactive mode. Type exit or press Ctrl-D to quit.")
-        while True:
-            try:
-                prompt = input("> ").strip()
-            except EOFError:
-                print()
-                break
+            print("Interactive mode. Type exit or press Ctrl-D to quit.")
+            while True:
+                try:
+                    prompt = input("> ").strip()
+                except EOFError:
+                    print()
+                    break
 
-            if prompt.lower() in {"exit", "quit"}:
-                break
-            if not prompt:
-                continue
+                if prompt.lower() in {"exit", "quit"}:
+                    break
+                if not prompt:
+                    continue
 
-            parent_message_id = stream_response(
-                api,
-                chat_id,
-                prompt,
-                parent_message_id=parent_message_id,
-                thinking=args.thinking,
-                search=args.search,
-            )
+                parent_message_id = stream_response(
+                    api,
+                    chat_id,
+                    prompt,
+                    parent_message_id=parent_message_id,
+                    thinking=args.thinking,
+                    search=args.search,
+                )
+        finally:
+            if not args.keep_history:
+                try:
+                    api.delete_chat_session(chat_id)
+                except APIError as exc:
+                    print(f"Could not delete web history: {exc}", file=sys.stderr)
 
         return 0
 
