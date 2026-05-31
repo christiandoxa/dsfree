@@ -30,7 +30,7 @@ Do not commit tokens, cookies, or generated credential files.
 ## Quick Test
 
 ```bash
-python example.py
+printf 'Reply only with: pong' | python dsfree.py
 ```
 
 ## CLI
@@ -43,6 +43,12 @@ python dsfree.py
 
 By default, the CLI deletes the temporary DeepSeek web chat when it exits. Use
 `--keep-history` only if you want the chat to stay visible in the web UI.
+
+Keep history for an interactive session:
+
+```bash
+python dsfree.py --keep-history
+```
 
 Send one prompt and exit without putting the token in shell history:
 
@@ -80,7 +86,8 @@ curl http://127.0.0.1:8000/chat/completions \
       {"role": "user", "content": "Reply only with: pong"}
     ],
     "thinking": {"type": "disabled"},
-    "stream": false
+    "stream": false,
+    "keep_history": false
   }'
 ```
 
@@ -111,10 +118,32 @@ Supported endpoints:
 
 Streaming is supported with `stream: true` and sends `data: [DONE]` at the end.
 
-By default, each API request creates a temporary web chat and deletes it after
-the response finishes, so it should not remain in the DeepSeek web history.
-Set `"keep_history": true` per request or `DSFREE_KEEP_HISTORY=1` on the server
-to keep chats visible.
+## Web History
+
+Default behavior: delete temporary DeepSeek web chats after each CLI run or API
+request finishes. This keeps dsfree calls out of the DeepSeek web sidebar.
+
+Keep history for one CLI run:
+
+```bash
+python dsfree.py --keep-history
+```
+
+Keep history for one API request:
+
+```json
+{
+  "model": "deepseek-v4-pro",
+  "messages": [{"role": "user", "content": "hi"}],
+  "keep_history": true
+}
+```
+
+Keep history for every API request handled by the server:
+
+```bash
+export DSFREE_KEEP_HISTORY=1
+```
 
 ## Minimal Usage
 
@@ -132,6 +161,8 @@ for chunk in api.chat_completion(
 ):
     if chunk["type"] == "text":
         print(chunk["content"], end="", flush=True)
+
+api.delete_chat_session(chat_id)
 ```
 
 ## Notes
