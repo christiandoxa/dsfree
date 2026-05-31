@@ -4,3 +4,5 @@ numpy
 nodriver
 drissionpage
 python-dotenv
+fastapi
+uvicorn

@@ -54,6 +54,60 @@ python dsfree.py <token> "Reply only with: pong"
 DEEPSEEK_AUTH_TOKEN='your-token' python dsfree.py
 ```
 
+## API Server
+
+Run a local API compatible with the DeepSeek/OpenAI chat-completions shape:
+
+```bash
+export DEEPSEEK_AUTH_TOKEN='your-web-token'
+export DSFREE_API_KEY='local-api-key'
+python api_server.py --host 127.0.0.1 --port 8000
+```
+
+Call it with curl:
+
+```bash
+curl http://127.0.0.1:8000/chat/completions \
+  -H 'Content-Type: application/json' \
+  -H 'Authorization: Bearer local-api-key' \
+  -d '{
+    "model": "deepseek-v4-pro",
+    "messages": [
+      {"role": "system", "content": "You are concise."},
+      {"role": "user", "content": "Reply only with: pong"}
+    ],
+    "thinking": {"type": "disabled"},
+    "stream": false
+  }'
+```
+
+Use it with the OpenAI SDK:
+
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    api_key="local-api-key",
+    base_url="http://127.0.0.1:8000",
+)
+
+response = client.chat.completions.create(
+    model="deepseek-v4-pro",
+    messages=[{"role": "user", "content": "Reply only with: pong"}],
+)
+print(response.choices[0].message.content)
+```
+
+Supported endpoints:
+
+- `GET /health`
+- `GET /models`
+- `GET /v1/models`
+- `POST /chat/completions`
+- `POST /v1/chat/completions`
+
+Streaming is supported with `stream: true` and sends `data: [DONE]` at the end.
+
 ## Minimal Usage
 
 ```python
